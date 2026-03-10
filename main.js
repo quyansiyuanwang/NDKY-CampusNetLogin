@@ -817,81 +817,96 @@ RSAUtils.setMaxDigits(130);
 // ============================================
 // 3. 获取配置信息
 // ============================================
-async function fetchConfig(baseUrl) {
+async function fetchConfig(baseUrl, retries = 3) {
   console.log("🔍 正在获取登录配置...\n");
 
-  // 跟随所有重定向
-  const { response, redirectCount } = await followRedirects(baseUrl);
-  console.log(`   完成 ${redirectCount} 次重定向\n`);
-
-  // 从 HTML 中提取 queryString
-  const html = response.body;
-  const config = {};
-
-  const jsRedirectMatch = html.match(/location\.href\s*=\s*['"]([^'"]+)['"]/i);
-  if (jsRedirectMatch) {
-    const redirectUrl = jsRedirectMatch[1];
-    console.log("   发现 JavaScript 重定向");
-
-    config.queryString = extractQueryString(redirectUrl);
-    if (config.queryString) {
-      console.log("   ✓ 提取到 queryString");
-    }
-
-    // 访问登录页面建立 Session
-    console.log("   正在访问登录页面...");
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      await httpGet(redirectUrl);
-      console.log("   ✓ 已访问登录页面");
-    } catch (e) {
-      console.log("   ⚠️  访问登录页面失败:", e.message);
-    }
-  }
+      // 跟随所有重定向
+      const { response, redirectCount } = await followRedirects(baseUrl);
+      console.log(`   完成 ${redirectCount} 次重定向\n`);
 
-  // 调用 pageInfo API 获取 RSA 公钥
-  console.log("   正在调用 pageInfo API...");
-  try {
-    const pageInfoResult = await fetchPageInfo(baseUrl, config.queryString);
-    console.log(
-      "   pageInfo 响应:",
-      JSON.stringify(pageInfoResult).substring(0, 300),
-    );
+      // 从 HTML 中提取 queryString
+      const html = response.body;
+      const config = {};
 
-    if (pageInfoResult.publicKeyModulus) {
-      config.publicKeyModulus = pageInfoResult.publicKeyModulus;
-      console.log("   ✓ 提取到 publicKeyModulus");
-    } else {
-      console.log("   ⚠️  pageInfo 响应中没有 publicKeyModulus");
-    }
-
-    if (pageInfoResult.publicKeyExponent) {
-      config.publicKeyExponent = pageInfoResult.publicKeyExponent;
-      console.log("   ✓ 提取到 publicKeyExponent");
-    } else {
-      config.publicKeyExponent = CONSTANTS.DEFAULT_RSA_EXPONENT;
-      console.log(
-        `   ✓ 使用默认 publicKeyExponent: ${CONSTANTS.DEFAULT_RSA_EXPONENT}`,
+      const jsRedirectMatch = html.match(
+        /location\.href\s*=\s*['"]([^'"]+)['"]/i,
       );
+      if (jsRedirectMatch) {
+        const redirectUrl = jsRedirectMatch[1];
+        console.log("   发现 JavaScript 重定向");
+
+        config.queryString = extractQueryString(redirectUrl);
+        if (config.queryString) {
+          console.log("   ✓ 提取到 queryString");
+        }
+
+        // 访问登录页面建立 Session
+        console.log("   正在访问登录页面...");
+        try {
+          await httpGet(redirectUrl);
+          console.log("   ✓ 已访问登录页面");
+        } catch (e) {
+          console.log("   ⚠️  访问登录页面失败:", e.message);
+        }
+      }
+
+      // 调用 pageInfo API 获取 RSA 公钥
+      console.log("   正在调用 pageInfo API...");
+      try {
+        const pageInfoResult = await fetchPageInfo(baseUrl, config.queryString);
+        console.log(
+          "   pageInfo 响应:",
+          JSON.stringify(pageInfoResult).substring(0, 300),
+        );
+
+        if (pageInfoResult.publicKeyModulus) {
+          config.publicKeyModulus = pageInfoResult.publicKeyModulus;
+          console.log("   ✓ 提取到 publicKeyModulus");
+        } else {
+          console.log("   ⚠️  pageInfo 响应中没有 publicKeyModulus");
+        }
+
+        if (pageInfoResult.publicKeyExponent) {
+          config.publicKeyExponent = pageInfoResult.publicKeyExponent;
+          console.log("   ✓ 提取到 publicKeyExponent");
+        } else {
+          config.publicKeyExponent = CONSTANTS.DEFAULT_RSA_EXPONENT;
+          console.log(
+            `   ✓ 使用默认 publicKeyExponent: ${CONSTANTS.DEFAULT_RSA_EXPONENT}`,
+          );
+        }
+      } catch (error) {
+        console.log("   ❌ 调用 pageInfo API 失败:", error.message);
+      }
+
+      // 备用公钥（如果 API 失败）
+      if (!config.publicKeyModulus && config.queryString) {
+        console.log("\n⚠️  无法从 API 获取公钥，尝试使用已知公钥...");
+        config.publicKeyModulus =
+          "94dd2a8675fb779e6b9f7103698634cd400f27a154afa67af6166a43fc26417222a79506d34cacc7641946abda1785b7acf9910ad6a0978c91ec84d40b71d2891379af19ffb333e7517e390bd26ac312fe940c340466b4a5d4af1d65c3b5944078f96a1a51a5a53e4bc302818b7c9f63c4a1b07bd7d874cef1c3d4b2f5eb7871";
+        config.publicKeyExponent = CONSTANTS.DEFAULT_RSA_EXPONENT;
+        console.log("   ✓ 使用备用公钥\n");
+      }
+
+      if (!config.queryString || !config.publicKeyModulus) {
+        throw new Error("无法提取完整的配置信息");
+      }
+
+      console.log("\n✅ 配置获取成功\n");
+      return config;
+    } catch (error) {
+      console.log(`   ❌ 尝试 ${attempt}/${retries} 失败: ${error.message}`);
+      if (attempt < retries) {
+        console.log(`   ⏳ 等待 3 秒后重试...\n`);
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      } else {
+        console.log(`   ❌ 已达到最大重试次数，跳过本次配置获取\n`);
+        return null;
+      }
     }
-  } catch (error) {
-    console.log("   ❌ 调用 pageInfo API 失败:", error.message);
   }
-
-  // 备用公钥（如果 API 失败）
-  if (!config.publicKeyModulus && config.queryString) {
-    console.log("\n⚠️  无法从 API 获取公钥，尝试使用已知公钥...");
-    config.publicKeyModulus =
-      "94dd2a8675fb779e6b9f7103698634cd400f27a154afa67af6166a43fc26417222a79506d34cacc7641946abda1785b7acf9910ad6a0978c91ec84d40b71d2891379af19ffb333e7517e390bd26ac312fe940c340466b4a5d4af1d65c3b5944078f96a1a51a5a53e4bc302818b7c9f63c4a1b07bd7d874cef1c3d4b2f5eb7871";
-    config.publicKeyExponent = CONSTANTS.DEFAULT_RSA_EXPONENT;
-    console.log("   ✓ 使用备用公钥\n");
-  }
-
-  if (!config.queryString || !config.publicKeyModulus) {
-    throw new Error("无法提取完整的配置信息");
-  }
-
-  console.log("\n✅ 配置获取成功\n");
-  return config;
 }
 
 // ============================================
@@ -911,7 +926,7 @@ function encryptPassword(
 // ============================================
 // 5. 执行登录
 // ============================================
-async function performLogin(config) {
+async function performLogin(config, retries = 3) {
   console.log("🔐 正在登录...\n");
 
   const encryptedPwd = encryptPassword(
@@ -941,15 +956,32 @@ async function performLogin(config) {
   );
   console.log("");
 
-  const result = await httpPost(loginUrl, postData);
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const result = await httpPost(loginUrl, postData);
 
-  if (result.result === "success" || result.result === 1) {
-    console.log("✅ 登录成功!\n");
-    return true;
-  } else {
-    console.log(`❌ 登录失败: ${result.message || JSON.stringify(result)}\n`);
-    return false;
+      if (result.result === "success" || result.result === 1) {
+        console.log("✅ 登录成功!\n");
+        return true;
+      } else {
+        console.log(
+          `❌ 登录失败: ${result.message || JSON.stringify(result)}\n`,
+        );
+        return false;
+      }
+    } catch (error) {
+      console.log(`   ❌ 尝试 ${attempt}/${retries} 失败: ${error.message}`);
+      if (attempt < retries) {
+        console.log(`   ⏳ 等待 2 秒后重试...\n`);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      } else {
+        console.log(`   ❌ 已达到最大重试次数\n`);
+        return false;
+      }
+    }
   }
+
+  return false;
 }
 
 // ============================================
@@ -971,19 +1003,19 @@ async function checkInternetConnection() {
 // 7. 主循环
 // ============================================
 async function main() {
-  try {
-    // 读取环境变量
-    const env = loadEnv();
-    console.log(`📋 用户名: ${env.USERNAME}`);
-    console.log(`🌐 服务器: ${env.BASE_URL}\n`);
+  // 读取环境变量
+  const env = loadEnv();
+  console.log(`📋 用户名: ${env.USERNAME}`);
+  console.log(`🌐 服务器: ${env.BASE_URL}\n`);
 
-    // 检查间隔（秒）
-    const CHECK_INTERVAL = parseInt(env.CHECK_INTERVAL || "5");
-    console.log(`⏱️  检查间隔: ${CHECK_INTERVAL} 秒\n`);
+  // 检查间隔（秒）
+  const CHECK_INTERVAL = parseInt(env.CHECK_INTERVAL || "5");
+  console.log(`⏱️  检查间隔: ${CHECK_INTERVAL} 秒\n`);
 
-    let config = null;
+  let config = null;
 
-    while (true) {
+  while (true) {
+    try {
       console.log(`[${new Date().toLocaleString()}] 检查网络连接...`);
 
       const isConnected = await checkInternetConnection();
@@ -995,7 +1027,17 @@ async function main() {
 
         // 获取配置（如果还没有）
         if (!config) {
-          config = await fetchConfig(env.BASE_URL);
+          config = await fetchConfig(env.BASE_URL, env.REQUEST_RETRIES);
+          if (!config) {
+            console.log("⚠️  无法获取配置，将在下次检查时重试\n");
+            // 等待后继续下一次循环
+            console.log(`💤 等待 ${CHECK_INTERVAL} 秒后再次检查...\n`);
+            console.log("─".repeat(64) + "\n");
+            await new Promise((resolve) =>
+              setTimeout(resolve, CHECK_INTERVAL * 1000),
+            );
+            continue;
+          }
         }
 
         // 执行登录
@@ -1004,7 +1046,7 @@ async function main() {
           password: env.PASSWORD,
           baseUrl: env.BASE_URL,
           ...config,
-        });
+        }, env.REQUEST_RETRIES);
 
         if (loginSuccess) {
           console.log("🎉 已重新连接到网络\n");
@@ -1020,11 +1062,17 @@ async function main() {
       await new Promise((resolve) =>
         setTimeout(resolve, CHECK_INTERVAL * 1000),
       );
+    } catch (error) {
+      console.error("❌ 发生错误:", error.message);
+      console.log("⚠️  将在下次检查时重试\n");
+
+      // 等待后继续
+      console.log(`💤 等待 ${CHECK_INTERVAL} 秒后再次检查...\n`);
+      console.log("─".repeat(64) + "\n");
+      await new Promise((resolve) =>
+        setTimeout(resolve, CHECK_INTERVAL * 1000),
+      );
     }
-  } catch (error) {
-    console.error("❌ 错误:", error.message);
-    console.log("");
-    process.exit(1);
   }
 }
 
