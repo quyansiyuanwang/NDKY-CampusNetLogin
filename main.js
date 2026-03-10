@@ -856,11 +856,6 @@ async function fetchConfig(baseUrl, retries = 3) {
       console.log("   正在调用 pageInfo API...");
       try {
         const pageInfoResult = await fetchPageInfo(baseUrl, config.queryString);
-        console.log(
-          "   pageInfo 响应:",
-          JSON.stringify(pageInfoResult).substring(0, 300),
-        );
-
         if (pageInfoResult.publicKeyModulus) {
           config.publicKeyModulus = pageInfoResult.publicKeyModulus;
           console.log("   ✓ 提取到 publicKeyModulus");
@@ -879,15 +874,6 @@ async function fetchConfig(baseUrl, retries = 3) {
         }
       } catch (error) {
         console.log("   ❌ 调用 pageInfo API 失败:", error.message);
-      }
-
-      // 备用公钥（如果 API 失败）
-      if (!config.publicKeyModulus && config.queryString) {
-        console.log("\n⚠️  无法从 API 获取公钥，尝试使用已知公钥...");
-        config.publicKeyModulus =
-          "94dd2a8675fb779e6b9f7103698634cd400f27a154afa67af6166a43fc26417222a79506d34cacc7641946abda1785b7acf9910ad6a0978c91ec84d40b71d2891379af19ffb333e7517e390bd26ac312fe940c340466b4a5d4af1d65c3b5944078f96a1a51a5a53e4bc302818b7c9f63c4a1b07bd7d874cef1c3d4b2f5eb7871";
-        config.publicKeyExponent = CONSTANTS.DEFAULT_RSA_EXPONENT;
-        console.log("   ✓ 使用备用公钥\n");
       }
 
       if (!config.queryString || !config.publicKeyModulus) {
