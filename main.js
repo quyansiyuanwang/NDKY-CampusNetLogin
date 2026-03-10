@@ -99,7 +99,6 @@ RSAUtils.setMaxDigits = function (value) {
 RSAUtils.setMaxDigits(130);
 
 let dpl10 = 15; // Decimal places for BigInt operations
-let lr10 = RSAUtils.biFromNumber(1000000000000000);
 
 // ============================================
 // 3. 获取配置信息
@@ -116,6 +115,8 @@ RSAUtils.biFromNumber = function (i) {
   }
   return result;
 };
+
+let lr10 = RSAUtils.biFromNumber(1000000000000000);
 
 RSAUtils.biFromDecimal = function (s) {
   let isNeg = s.charAt(0) == "-";
