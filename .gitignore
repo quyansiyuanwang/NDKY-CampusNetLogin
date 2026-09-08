@@ -1,27 +1,10 @@
-# 环境变量和敏感信息
 .env
-
-# Node.js
-node_modules/
-npm-debug.log
-yarn-error.log
-
-# 备份文件
-*.backup
-*.bak
-*.old
-
-# 操作系统
+config.toml
+config.yaml
+config.yml
+node/node_modules/
+__pycache__/
+*.pyc
+rust/target/
 .DS_Store
 Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# others
-drop/
-.claude/

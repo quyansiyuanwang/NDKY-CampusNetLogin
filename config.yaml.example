@@ -1,0 +1,7 @@
+username: your-student-id
+password: your-password
+base_url: http://10.88.108.101
+check_interval: 5
+request_retries: 3
+service: ""
+connectivity_test_url: http://www.msftconnecttest.com/connecttest.txt
