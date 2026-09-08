@@ -8,8 +8,12 @@ jobs:
     permissions: { contents: write }
     steps:
       - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@cargo-dist
-      - run: dist build --artifacts=local
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-dist
+      - name: Build release artifacts
+        working-directory: rust
+        run: dist build --artifacts=local
       - uses: softprops/action-gh-release@v2
         with:
-          files: target/distrib/*
+          files: rust/target/distrib/*
