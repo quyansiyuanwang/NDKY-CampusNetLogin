@@ -1,4 +1,8 @@
+[workspace]
+members = ["cargo:."]
+
 [dist]
+cargo-dist-version = "0.28.0"
 dist = true
 ci = ["github"]
 installers = []
