@@ -38,7 +38,7 @@ lua lua/campus_login.lua check
 
 ## 构建与发布
 
-Rust 使用 `rust/dist-workspace.toml` 配置 cargo-dist，目标平台为 Windows/Linux/macOS 的 x64 与 ARM64。推送 `v*` tag 后，GitHub Actions 使用 `taiki-e/install-action@v2` 安装 cargo-dist，自动构建并上传 Release 产物。发布包应包含 Rust 二进制、配置样例、Node/Python/Lua 源码、LICENSE 和 Lua 运行时启动文件。
+Rust 使用 `rust/dist-workspace.toml` 配置 cargo-dist，目标平台为 Windows/Linux/macOS 的 x64 与 ARM64。由于 cargo-dist 不支持从 Linux 交叉编译 macOS，发布工作流按目标平台使用原生 GitHub runner，并为每个 target 单独执行 `dist build --target ... --artifacts=local`。推送 `v*` tag 后，GitHub Actions 使用 `taiki-e/install-action@v2` 安装 cargo-dist，自动构建并上传 Release 产物。发布包应包含 Rust 二进制、配置样例、Node/Python/Lua 源码、LICENSE 和 Lua 运行时启动文件。
 
 Lua 源码运行需要 Lua 5.4、LuaSocket 与 dkjson；发布包提供 bundled launcher，免去用户单独安装解释器。Lua 5.4 本身没有原生大整数，因此 RSA 登录由 bundled launcher/Rust CLI 完成。
 
