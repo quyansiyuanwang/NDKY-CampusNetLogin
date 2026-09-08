@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 description = "Cross-platform campus network auto login"
 license = "MIT"
+repository = "https://github.com/quyansiyuanwang/NDKY-CampusNetLogin"
+readme = "../README.md"
 
 [dependencies]
 anyhow = "1"
