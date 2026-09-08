@@ -42,10 +42,25 @@ fn follow(client: &Client, start: &str) -> Result<(String, String)> {
     for _ in 0..10 { let r = get(client, current.as_str())?; let status = r.status(); if status.is_redirection() { if let Some(loc) = r.headers().get("location") { current = current.join(loc.to_str()?)?; continue; } } return Ok((current.to_string(), r.text()?)); }
     Err(anyhow!("重定向次数过多"))
 }
-fn query_from_redirect(html: &str) -> Option<String> { let re = Regex::new(r#"location\.href\s*=\s*['\"]([^'\"]+)['\"]"#).unwrap(); re.captures(html).and_then(|c| Url::parse(&c[1]).ok()).map(|u| u.query().unwrap_or("").to_string()).filter(|x| !x.is_empty()) }
+fn query_from_redirect(html: &str) -> Option<String> { let re = Regex::new(r#"location\.href\s*=\s*['\"]([^'\"]+)['\"]"#).unwrap(); re.captures(html).and_then(|c| c[1].split_once('?').map(|(_, q)| q.to_string())).filter(|x| !x.is_empty()) }
 fn page_info(client: &Client, base: &str, query: &str) -> Result<(String, String)> { let url = format!("{}{}pageInfo", base.trim_end_matches('/'), EPORTAL); let value: serde_json::Value = client.post(url).form(&[("queryString", query)]).send()?.json()?; let modulus = value.get("publicKeyModulus").and_then(|v| v.as_str()).ok_or_else(|| anyhow!("pageInfo 缺少 publicKeyModulus"))?.to_string(); let exponent = value.get("publicKeyExponent").and_then(|v| v.as_str()).unwrap_or("10001").to_string(); Ok((modulus, exponent)) }
-fn fetch_config(client: &Client, base: &str, retries: u32) -> Result<(String,String,String)> { let mut last = None; for _ in 0..retries { match (|| { let (redirect, html) = follow(client, base)?; let q = query_from_redirect(&html).ok_or_else(|| anyhow!("无法提取 queryString"))?; let (m,e) = page_info(client, base, &q)?; Ok((q,m,e)) })() { Ok(v) => return Ok(v), Err(e) => last = Some(e) } } Err(last.unwrap_or_else(|| anyhow!("获取配置失败"))) }
+fn fetch_config(client: &Client, base: &str, retries: u32) -> Result<(String,String,String)> { let mut last = None; for _ in 0..retries { match (|| { let (_redirect, html) = follow(client, base)?; let q = query_from_redirect(&html).ok_or_else(|| anyhow!("无法提取 queryString"))?; let (m,e) = page_info(client, base, &q)?; Ok((q,m,e)) })() { Ok(v) => return Ok(v), Err(e) => last = Some(e) } } Err(last.unwrap_or_else(|| anyhow!("获取配置失败"))) }
 fn rsa_encrypt(password: &str, modulus: &str, exponent: &str) -> Result<String> { let n = BigUint::parse_bytes(modulus.as_bytes(), 16).ok_or_else(|| anyhow!("RSA modulus 无效"))?; let e = BigUint::parse_bytes(exponent.as_bytes(), 16).ok_or_else(|| anyhow!("RSA exponent 无效"))?; let bytes: Vec<u16> = password.chars().rev().map(|c| c as u16).collect(); let chunk = ((n.bits() as usize + 7) / 8).saturating_sub(2).max(2); let mut out = Vec::new(); for part in bytes.chunks(chunk / 2) { let mut block = Vec::new(); for &u in part { block.push((u & 0xff) as u8); block.push((u >> 8) as u8); } while block.len() < chunk { block.push(0); } let x = BigUint::from_bytes_le(&block); out.push(format!("{:x}", x.modpow(&e, &n))); } Ok(out.join(" ")) }
 fn login(client: &Client, c: &Config, q: &str, modulus: &str, exponent: &str) -> Result<bool> { let password = rsa_encrypt(&c.password, modulus, exponent)?; let url = format!("{}{}login", c.base_url.trim_end_matches('/'), EPORTAL); let v: serde_json::Value = client.post(url).form(&[("userId", c.username.as_str()), ("password", password.as_str()), ("service", c.service.as_str()), ("queryString", q), ("operatorPwd", ""), ("operatorUserId", ""), ("validcode", ""), ("passwordEncrypt", "true")]).send()?.json()?; Ok(v.get("result").map(|x| x == "success" || x == 1).unwrap_or(false)) }
 fn check(client: &Client, url: &str) -> bool { get(client, url).and_then(|r| Ok(r.status().is_success() && r.text()?.trim() == TEST_BODY)).unwrap_or(false) }
 fn main() -> Result<()> { let cli = Cli::parse(); let path = config_path(cli.config)?; let mut c = load_config(&path)?; if let Some(v)=cli.interval { c.check_interval=v; } if let Some(v)=cli.retries { c.request_retries=v; } let client=client()?; match cli.command.unwrap_or(Command::Run{once:false}) { Command::Check => println!("{}", if check(&client,&c.connectivity_test_url) {"online"} else {"offline"}), Command::FetchConfig => { let (q,m,e)=fetch_config(&client,&c.base_url,c.request_retries)?; println!("queryString={q}\npublicKeyModulus={m}\npublicKeyExponent={e}"); }, Command::Run{once} => loop { if !check(&client,&c.connectivity_test_url) { let (q,m,e)=fetch_config(&client,&c.base_url,c.request_retries)?; println!("登录{}", if login(&client,&c,&q,&m,&e)? {"成功"} else {"失败"}); } else { println!("网络正常"); } if once { break; } thread::sleep(Duration::from_secs(c.check_interval)); } } Ok(()) }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn extracts_query_from_javascript_redirect() {
+        assert_eq!(query_from_redirect("<script>location.href='/index.jsp?a=1&b=2'</script>").unwrap(), "a=1&b=2");
+    }
+    #[test]
+    fn rsa_is_hex_and_deterministic() {
+        let a = rsa_encrypt("abc", "c1", "10001").unwrap();
+        assert_eq!(a, rsa_encrypt("abc", "c1", "10001").unwrap());
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit() || c == ' '));
+    }
+}
